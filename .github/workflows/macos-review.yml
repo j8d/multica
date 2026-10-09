@@ -1,0 +1,93 @@
+name: macOS ARM64 Review Build
+
+# Deliberately manual: no tag/release/container publication.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-review-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  review:
+    if: github.repository == 'j8d/multica'
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      # Do not use developer credentials for review artifacts.
+      APPLE_TEAM_ID: ""
+      GOMAXPROCS: "2"
+    steps:
+      - name: Checkout selected source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify runner architecture
+        run: test "$(uname -m)" = arm64
+
+      - name: Setup Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "~1.26.9"
+          check-latest: true
+          cache-dependency-path: server/go.sum
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify build scripts
+        run: |
+          node --test apps/desktop/scripts/bundle-cli.node-test.mjs
+          bash scripts/test-go.test.sh
+
+      - name: Verify optional CLI discovery regression
+        run: >-
+          bash scripts/go-test-with-agent-cli-guard.sh --
+          go test -C server -p 2 ./internal/daemon
+          -run '^TestAgentDiscoveryExplicitOnly$' -count=1 -v
+
+      - name: Scan CLI vulnerabilities
+        working-directory: server
+        run: go tool govulncheck ./cmd/multica
+
+      - name: Check Desktop
+        working-directory: apps/desktop
+        run: |
+          pnpm typecheck
+          pnpm lint
+          pnpm test
+
+      - name: Package ad-hoc review DMG and ZIP
+        working-directory: apps/desktop
+        run: node scripts/package.mjs --mac --arm64 --publish never -c.mac.identity=-
+
+      - name: Verify packages and write review provenance
+        working-directory: apps/desktop
+        run: node scripts/verify-macos-review.mjs
+
+      - name: Upload review artifacts only
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: multica-macos-arm64-adhoc-review-${{ github.sha }}
+          path: |
+            apps/desktop/dist/*.dmg
+            apps/desktop/dist/*.zip
+            apps/desktop/dist/SHA256SUMS.txt
+            apps/desktop/dist/REVIEW-BUILD.json
+          if-no-files-found: error
+          retention-days: 14

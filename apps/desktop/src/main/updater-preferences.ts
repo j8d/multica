@@ -1,44 +1,32 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { UpdaterPreferences } from "../shared/updater-types";
 
 export const DEFAULT_UPDATER_PREFERENCES: UpdaterPreferences = {
-  automaticUpdates: true,
+  automaticUpdates: false,
 };
 
 export function updaterPreferencesPath(userDataPath: string): string {
   return join(userDataPath, "updater-preferences.json");
 }
 
-function parseUpdaterPreferences(value: unknown): UpdaterPreferences {
-  const candidate = value as { automaticUpdates?: unknown } | null;
-  if (
-    typeof value === "object" &&
-    value !== null &&
-    typeof candidate?.automaticUpdates === "boolean"
-  ) {
-    return { automaticUpdates: candidate.automaticUpdates };
-  }
-
-  return { ...DEFAULT_UPDATER_PREFERENCES };
-}
-
+// Review-build policy is unconditional, not a preference a saved file can undo.
 export async function loadUpdaterPreferences(
-  filePath: string,
+  _filePath: string,
 ): Promise<UpdaterPreferences> {
-  try {
-    return parseUpdaterPreferences(JSON.parse(await readFile(filePath, "utf-8")));
-  } catch {
-    return { ...DEFAULT_UPDATER_PREFERENCES };
-  }
+  return { automaticUpdates: false };
 }
 
 export async function saveUpdaterPreferences(
   filePath: string,
-  preferences: UpdaterPreferences,
+  _preferences: UpdaterPreferences,
 ): Promise<void> {
   await mkdir(dirname(filePath), { recursive: true });
   const temporaryPath = `${filePath}.tmp`;
-  await writeFile(temporaryPath, JSON.stringify(preferences, null, 2), "utf-8");
+  await writeFile(
+    temporaryPath,
+    JSON.stringify({ automaticUpdates: false }, null, 2),
+    "utf-8",
+  );
   await rename(temporaryPath, filePath);
 }

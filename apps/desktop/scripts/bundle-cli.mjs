@@ -9,9 +9,8 @@
 // ldflags mirror `make build` so `multica --version` reports a meaningful
 // version / commit / date.
 //
-// Graceful: if `go` is not installed (e.g. frontend-only contributor), we
-// skip the build and fall through to auto-install at runtime. A genuine
-// Go compile error is fatal — you want that to block dev, not hide.
+// This fork requires Go and a newly built CLI. Never package stale output
+// or depend on upstream downloads to repair a review build.
 
 import { access, chmod, copyFile, mkdir, rm } from "node:fs/promises";
 import { constants } from "node:fs";
@@ -134,20 +133,12 @@ if (hasGo()) {
     },
   );
 } else {
-  console.warn(
-    "[bundle-cli] `go` not found in PATH — skipping CLI build. " +
-      "Desktop will use whatever is already in resources/bin/, or fall back " +
-      "to auto-installing the latest release at runtime.",
-  );
+  throw new Error("[bundle-cli] Go is required to build the patched CLI; refusing stale output.");
 }
 
 if (!(await exists(srcBinary))) {
-  console.warn(
-    `[bundle-cli] ${srcBinary} not present — Desktop will fall back to ` +
-      `auto-installing the latest release at runtime.`,
-  );
   await rm(destDir, { recursive: true, force: true });
-  process.exit(0);
+  throw new Error(`[bundle-cli] ${srcBinary} not present after build; refusing to package.`);
 }
 
 await rm(destDir, { recursive: true, force: true });
@@ -155,8 +146,8 @@ await mkdir(destDir, { recursive: true });
 await copyFile(srcBinary, destBinary);
 await chmod(destBinary, 0o755);
 
-// macOS: ad-hoc sign so Gatekeeper doesn't complain when the parent app
-// (which itself may be unsigned in dev) spawns the child.
+// Ad-hoc signatures support local review builds, not Developer ID trust
+// or corporate installation approval. Packaging verifies the final signature.
 if (process.platform === "darwin") {
   try {
     execSync(`codesign -s - --force ${JSON.stringify(destBinary)}`, {

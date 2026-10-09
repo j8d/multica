@@ -291,17 +291,16 @@ describe("builderArgsForTarget", () => {
       "--publish",
       "never",
       "-c.directories.output=dist/win-arm64",
-      "-c.publish.channel=latest-arm64",
     ]);
   });
 
-  it("does not override the publish channel for Windows x64 (default latest.yml)", () => {
+  it("does not add publisher overrides for Windows x64", () => {
     expect(
       builderArgsForTarget(
         { platform: "win", arch: "x64" },
         {
           allPlatforms: false,
-          sharedArgs: ["--publish", "always"],
+          sharedArgs: ["--publish", "never"],
           platformTargets: { mac: [], win: ["nsis"], linux: [] },
           requestedPlatforms: ["win"],
           requestedArchs: ["x64"],
@@ -315,18 +314,18 @@ describe("builderArgsForTarget", () => {
       "nsis",
       "--x64",
       "--publish",
-      "always",
+      "never",
       "-c.directories.output=dist/win-x64",
     ]);
   });
 
-  it("isolates the macOS x64 feed and platform floor", () => {
+  it("retains the macOS x64 platform floor without a publisher override", () => {
     expect(
       builderArgsForTarget(
         { platform: "mac", arch: "x64" },
         {
           allPlatforms: false,
-          sharedArgs: ["--publish", "always"],
+          sharedArgs: ["--publish", "never"],
           platformTargets: { mac: ["dmg", "zip"], win: [], linux: [] },
           requestedPlatforms: ["mac"],
           requestedArchs: ["x64"],
@@ -341,20 +340,19 @@ describe("builderArgsForTarget", () => {
       "zip",
       "--x64",
       "--publish",
-      "always",
+      "never",
       "-c.directories.output=dist/mac-x64",
       "-c.mac.minimumSystemVersion=12.0.0",
-      "-c.publish.channel=latest-x64",
     ]);
   });
 
-  it("keeps macOS arm64 on the existing latest-mac update channel", () => {
+  it("does not add publisher overrides for macOS arm64", () => {
     expect(
       builderArgsForTarget(
         { platform: "mac", arch: "arm64" },
         {
           allPlatforms: false,
-          sharedArgs: ["--publish", "always"],
+          sharedArgs: ["--publish", "never"],
           platformTargets: { mac: [], win: [], linux: [] },
           requestedPlatforms: ["mac"],
           requestedArchs: ["arm64"],
@@ -367,7 +365,7 @@ describe("builderArgsForTarget", () => {
       "--mac",
       "--arm64",
       "--publish",
-      "always",
+      "never",
       "-c.directories.output=dist/mac-arm64",
     ]);
   });
