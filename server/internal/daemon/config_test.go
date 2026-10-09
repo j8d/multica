@@ -1502,6 +1502,36 @@ func TestProbeAgentCLIsIgnoresNonExecutableCodexBundle(t *testing.T) {
 	}
 }
 
+func TestAgentDiscoveryExplicitOnly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake shell executable is Unix-only")
+	}
+
+	for _, name := range defaultAgentCommandNames {
+		if name == "openclaw" {
+			t.Fatal("automatic login-shell discovery includes openclaw")
+		}
+	}
+
+	pathDir := t.TempDir()
+	executable := filepath.Join(pathDir, "openclaw")
+	if err := os.WriteFile(executable, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake CLI: %v", err)
+	}
+	t.Setenv("PATH", pathDir)
+	t.Setenv("SHELL", filepath.Join(pathDir, "fish"))
+	t.Setenv("MULTICA_OPENCLAW_PATH", "")
+	if _, found := probeAgentCLIs()["openclaw"]; found {
+		t.Fatal("CLI was registered without an explicit path")
+	}
+
+	t.Setenv("MULTICA_OPENCLAW_PATH", executable)
+	entry, found := probeAgentCLIs()["openclaw"]
+	if !found || entry.Path != executable {
+		t.Fatalf("explicit CLI path not registered: entry=%+v, found=%v", entry, found)
+	}
+}
+
 // When both the nested CLI and the older flat binary exist, the nested path
 // is the current ChatGPT.app layout and must win.
 func TestLoadConfig_PrefersNestedChatGPTCodexCLIPath(t *testing.T) {
