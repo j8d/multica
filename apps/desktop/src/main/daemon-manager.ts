@@ -22,7 +22,10 @@ import type {
   LocalRuntimeProbe,
 } from "../shared/daemon-types";
 import { daemonStatusAlive } from "../shared/daemon-types";
-import { ensureManagedCli, managedCliPath } from "./cli-bootstrap";
+import {
+  BUNDLED_CLI_UNAVAILABLE_MESSAGE,
+  resolveBundledCli,
+} from "./cli-bootstrap";
 import { decideVersionAction } from "./version-decision";
 import {
   deriveProfileName,
@@ -316,7 +319,7 @@ function observeDaemonBoundary(status: DaemonStatus): void {
 }
 
 async function fetchHealth(): Promise<DaemonStatus> {
-  // While the CLI is being downloaded or has permanently failed, short-circuit
+  // While the bundled CLI is being validated or has failed, short-circuit
   // polling — there's nothing to probe yet and /health calls would just return
   // "stopped", which would overwrite the correct setup state in the UI.
   if (currentState === "installing_cli" || currentState === "cli_not_found") {
@@ -417,143 +420,19 @@ async function fetchHealth(): Promise<DaemonStatus> {
   };
 }
 
-function findCliOnPath(): string | null {
-  const candidates = process.platform === "win32" ? ["multica.exe"] : ["multica"];
-  const paths = (process.env["PATH"] ?? "").split(
-    process.platform === "win32" ? ";" : ":",
-  );
-  if (process.platform === "darwin") {
-    paths.push("/opt/homebrew/bin", "/usr/local/bin");
-  }
-  for (const name of candidates) {
-    for (const dir of paths) {
-      const full = join(dir, name);
-      if (existsSync(full)) return full;
-    }
-  }
-  return null;
-}
-
 /**
- * Returns the path to the CLI binary bundled inside the Desktop app.
- *
- * - Dev (`electron-vite dev`): `app.getAppPath()` → `apps/desktop`, resolving
- *   to `apps/desktop/resources/bin/multica`. `bundle-cli.mjs` populates this
- *   before dev starts, so iterating on Go changes is "make build → restart".
- * - Packaged: `app.getAppPath()` → `<Multica.app>/Contents/Resources/app.asar`.
- *   electron-builder's `asarUnpack: resources/**` extracts the binary to
- *   `app.asar.unpacked/`, so we swap the path segment to execute it.
- */
-function bundledCliPath(): string {
-  const binName = process.platform === "win32" ? "multica.exe" : "multica";
-  return join(app.getAppPath(), "resources", "bin", binName).replace(
-    "app.asar",
-    "app.asar.unpacked",
-  );
-}
-
-async function probeCliBinary(
-  bin: string,
-  source: "bundled" | "managed" | "path",
-): Promise<string | null> {
-  try {
-    const stdout = await new Promise<string>((resolve, reject) => {
-      execFile(
-        bin,
-        ["version", "--output", "json"],
-        { timeout: 5_000 },
-        (err, out) => {
-          if (err) reject(err);
-          else resolve(out);
-        },
-      );
-    });
-    const parsed = JSON.parse(stdout) as { version?: string };
-    if (typeof parsed.version === "string" && parsed.version.length > 0) {
-      return parsed.version;
-    }
-    console.warn(
-      `[daemon] ignoring ${source} CLI at ${bin}: version output was missing or invalid`,
-    );
-    return null;
-  } catch (err) {
-    console.warn(`[daemon] ignoring ${source} CLI at ${bin}:`, err);
-    return null;
-  }
-}
-
-/**
- * Returns a usable `multica` binary path. Priority:
- *   1. Cached result from a previous successful resolve.
- *   2. Bundled binary shipped with the Desktop app (`bundle-cli.mjs`).
- *   3. Managed binary already installed in userData (`managedCliPath`).
- *   4. Download + install latest release into userData.
- *   5. `multica` on PATH (dev convenience / user-installed via brew).
- * Returns `null` only when all of the above fail.
- *
- * Bundled is preferred so Desktop iterates in lockstep with Go changes in
- * the same repo — avoids the 404 / stale-API problem when the Desktop's
- * TS side is ahead of the last published CLI release.
- *
- * This function is idempotent and safe to call concurrently — in-flight
- * installs are de-duplicated via `cliResolvePromise`.
+ * Cache only the validated bundled CLI for this process. Concurrent callers
+ * share validation; a missing or unusable bundle fails closed until retry.
  */
 async function resolveCliBinary(): Promise<string | null> {
   if (cachedCliBinary !== undefined) return cachedCliBinary;
   if (cliResolvePromise) return cliResolvePromise;
 
   cliResolvePromise = (async () => {
-    const bundled = bundledCliPath();
-    if (existsSync(bundled)) {
-      const version = await probeCliBinary(bundled, "bundled");
-      if (version) {
-        console.log(`[daemon] using bundled CLI at ${bundled}`);
-        cachedCliBinary = bundled;
-        cachedCliBinaryVersion = version;
-        return bundled;
-      }
-    }
-
-    const managed = managedCliPath();
-    if (existsSync(managed)) {
-      const version = await probeCliBinary(managed, "managed");
-      if (version) {
-        cachedCliBinary = managed;
-        cachedCliBinaryVersion = version;
-        return managed;
-      }
-    }
-
-    try {
-      const installed = await ensureManagedCli({
-        forceInstall: existsSync(managed),
-      });
-      const version = await probeCliBinary(installed, "managed");
-      if (version) {
-        cachedCliBinary = installed;
-        cachedCliBinaryVersion = version;
-        return installed;
-      }
-      console.warn(
-        `[daemon] managed CLI at ${installed} failed validation after install`,
-      );
-    } catch (err) {
-      console.warn("[daemon] CLI auto-install failed, falling back to PATH:", err);
-    }
-
-    const onPath = findCliOnPath();
-    if (onPath) {
-      const version = await probeCliBinary(onPath, "path");
-      if (version) {
-        cachedCliBinary = onPath;
-        cachedCliBinaryVersion = version;
-        return onPath;
-      }
-    }
-
-    cachedCliBinary = null;
-    cachedCliBinaryVersion = null;
-    return null;
+    const bundled = await resolveBundledCli();
+    cachedCliBinary = bundled?.path ?? null;
+    cachedCliBinaryVersion = bundled?.version ?? null;
+    return cachedCliBinary;
   })();
 
   try {
@@ -563,21 +442,9 @@ async function resolveCliBinary(): Promise<string | null> {
   }
 }
 
-/**
- * Reads the version of the currently resolved CLI binary. Cached for the
- * process lifetime — the bundled binary doesn't change after bundle time.
- * Returns null on any failure (unknown `go` at bundle time, broken binary,
- * wrong-arch bundled binary, etc.) so callers can fail open.
- */
 async function getCliBinaryVersion(): Promise<string | null> {
-  if (cachedCliBinaryVersion !== undefined) return cachedCliBinaryVersion;
-  const bin = await resolveCliBinary();
-  if (!bin) {
-    cachedCliBinaryVersion = null;
-    return null;
-  }
-  cachedCliBinaryVersion = await probeCliBinary(bin, "path");
-  return cachedCliBinaryVersion;
+  await resolveCliBinary();
+  return cachedCliBinaryVersion ?? null;
 }
 
 /**
@@ -943,7 +810,7 @@ async function startDaemon(
   recoveryProfile?: ActiveProfile,
 ): Promise<{ success: boolean; error?: string }> {
   const bin = await resolveCliBinary();
-  if (!bin) return { success: false, error: "multica CLI is not installed" };
+  if (!bin) return { success: false, error: BUNDLED_CLI_UNAVAILABLE_MESSAGE };
 
   const active = await ensureActiveProfile();
   if (!active) {
@@ -1044,7 +911,7 @@ async function stopDaemon(): Promise<{ success: boolean; error?: string }> {
   if (await lifecycleBlockedByForeignDaemon()) return { success: true };
 
   const bin = await resolveCliBinary();
-  if (!bin) return { success: false, error: "multica CLI is not installed" };
+  if (!bin) return { success: false, error: BUNDLED_CLI_UNAVAILABLE_MESSAGE };
 
   const active = await ensureActiveProfile();
   if (!active) return { success: true };
@@ -1410,8 +1277,8 @@ export function setupDaemonManager(
   ipcMain.handle("daemon:retry-install", async () => {
     cachedCliBinary = undefined;
     cliResolvePromise = null;
-    // A retry-install may land a new CLI at a different version; drop the
-    // cached version string so the next check re-reads the binary.
+    // Legacy retry-install only revalidates the bundled CLI. It cannot
+    // download or replace anything; clear the cached validation result.
     cachedCliBinaryVersion = undefined;
     await lifecycleOperations.runForeground(() => bootstrapCli());
   });
@@ -1471,8 +1338,8 @@ export function setupDaemonManager(
     return error === "" ? { success: true } : { success: false, error };
   });
 
-  // First-run CLI install kicks off here. Status bar shows "Setting up…"
-  // until the managed binary is on disk (instant on subsequent launches).
+  // Validate the bundled CLI before polling or starting any local daemon.
+  // Keep the existing setup state for renderer IPC compatibility.
   currentState = "installing_cli";
   sendStatus({ state: "installing_cli" });
   void lifecycleOperations.runBackground(() => bootstrapCli());

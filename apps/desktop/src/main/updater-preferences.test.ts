@@ -24,16 +24,38 @@ afterEach(async () => {
 });
 
 describe("updater preferences", () => {
-  it("defaults automatic updates to enabled when the file is missing or invalid", async () => {
+  it("defaults automatic updates to disabled when the file is missing or invalid", async () => {
     const missingPath = await makePreferencesPath();
     const invalidPath = await makePreferencesPath();
     await writeFile(invalidPath, JSON.stringify({ automaticUpdates: "false" }));
 
     await expect(loadUpdaterPreferences(missingPath)).resolves.toEqual({
-      automaticUpdates: true,
+      automaticUpdates: false,
     });
     await expect(loadUpdaterPreferences(invalidPath)).resolves.toEqual({
-      automaticUpdates: true,
+      automaticUpdates: false,
+    });
+  });
+
+  it("ignores saved true values", async () => {
+    const filePath = await makePreferencesPath();
+    await writeFile(filePath, JSON.stringify({ automaticUpdates: true }));
+
+    await expect(loadUpdaterPreferences(filePath)).resolves.toEqual({
+      automaticUpdates: false,
+    });
+  });
+
+  it("never persists a request to enable automatic updates", async () => {
+    const filePath = await makePreferencesPath();
+
+    await saveUpdaterPreferences(filePath, { automaticUpdates: true });
+
+    expect(JSON.parse(await readFile(filePath, "utf-8"))).toEqual({
+      automaticUpdates: false,
+    });
+    await expect(loadUpdaterPreferences(filePath)).resolves.toEqual({
+      automaticUpdates: false,
     });
   });
 

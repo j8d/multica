@@ -340,20 +340,10 @@ export function builderArgsForTarget(
       `-c.directories.output=dist/${target.platform}-${target.arch}`,
     );
   }
-  // electron-builder only adds an architecture suffix to Linux update
-  // metadata. Windows x64/arm64 would both publish `latest.yml`, while macOS
-  // arm64/x64 would both publish `latest-mac.yml`. Keep the established x64
-  // Windows and arm64 macOS feeds unchanged for installed clients, and route
-  // the additional architectures to explicit channels. updater.ts pins the
-  // matching channel at runtime.
-  if (target.platform === "win" && target.arch === "arm64") {
-    builderArgs.push("-c.publish.channel=latest-arm64");
-  }
   if (target.platform === "mac" && target.arch === "x64") {
     // Scope the Electron 39 platform floor to the new Intel package so this
     // change does not rewrite established Apple Silicon bundle metadata.
     builderArgs.push("-c.mac.minimumSystemVersion=12.0.0");
-    builderArgs.push("-c.publish.channel=latest-x64");
   }
   return builderArgs;
 }
