@@ -29,7 +29,6 @@ import {
 import { decideVersionAction } from "./version-decision";
 import {
   deriveProfileName,
-  healthPortForProfile,
   profileArgs,
   profileConfigPath,
   profileDir,
@@ -37,6 +36,7 @@ import {
   profilePidPath,
   profileUserIdPath,
 } from "./daemon-profile";
+import { probeProfileHealth } from "./daemon-port";
 import {
   DaemonOperationGate,
   DaemonRecoveryPolicy,
@@ -83,7 +83,6 @@ const DEFAULT_PREFS: DaemonPrefs = { autoStart: true, autoStop: false };
 // `null` at every call site, never by an empty name — see daemon-profile.ts.
 interface ActiveProfile {
   name: string;
-  port: number;
 }
 
 let statusPollTimer: ReturnType<typeof setInterval> | null = null;
@@ -174,6 +173,7 @@ function sendStatus(status: DaemonStatus): void {
 interface HealthPayload {
   status?: string;
   pid?: number;
+  profile?: string;
   /** Daemon's runtime.GOOS. Absent on daemons older than the #3916 fix. */
   os?: string;
   uptime?: string;
@@ -203,6 +203,15 @@ async function fetchHealthAtPort(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function fetchProfileHealth(
+  active: ActiveProfile,
+  timeoutMs = HEALTH_PROBE_TIMEOUT_MS,
+): Promise<HealthPayload | null> {
+  return probeProfileHealth(active.name, (port) =>
+    fetchHealthAtPort(port, timeoutMs),
+  );
 }
 
 /**
@@ -286,7 +295,7 @@ async function resolveActiveProfile(): Promise<ActiveProfile | null> {
     console.log(`[daemon] initialized profile "${name}" → ${target}`);
   }
 
-  return { name, port: healthPortForProfile(name) };
+  return { name };
 }
 
 async function ensureActiveProfile(): Promise<ActiveProfile | null> {
@@ -331,7 +340,7 @@ async function fetchHealth(): Promise<DaemonStatus> {
   // honest answer; probing the default port would surface the user's own CLI
   // daemon as if it were Desktop's.
   if (!active) return { state: "stopped" };
-  const data = await fetchHealthAtPort(active.port);
+  const data = await fetchProfileHealth(active);
 
   if (!data || data.status !== "running") {
     // A start that never reaches "running" is the symptom; an expired/invalid
@@ -467,7 +476,7 @@ async function ensureRunningDaemonVersionMatches(): Promise<
 > {
   const active = await ensureActiveProfile();
   if (!active) return "not_running";
-  const running = await fetchHealthAtPort(active.port);
+  const running = await fetchProfileHealth(active);
 
   // Don't try to version-match a daemon we can't restart (e.g. WSL2). Treat it
   // as up-to-date — restartDaemon would no-op anyway, and skipping here avoids
@@ -608,7 +617,7 @@ async function restartDaemonAfterUserSwitch(
 ): Promise<void> {
   // If we just rotated credentials onto a running daemon, restart it so the
   // in-memory token in the Go process matches the new config.
-  const existing = await fetchHealthAtPort(active.port);
+  const existing = await fetchProfileHealth(active);
   if (daemonStatusAlive(existing?.status)) {
     // Restart whether it's "running" or still "starting" — a booting daemon
     // already loaded the old token at startup, so it must be restarted to
@@ -827,7 +836,7 @@ async function startDaemon(
   ) {
     return { success: false, error: "Daemon recovery was superseded" };
   }
-  const existing = await fetchHealthAtPort(active.port);
+  const existing = await fetchProfileHealth(active);
   if (daemonStatusAlive(existing?.status)) {
     // A daemon is already up ("running") or booting ("starting") on this port —
     // don't spawn a second one (the CLI rejects that as "already running").
@@ -895,7 +904,7 @@ async function lifecycleBlockedByForeignDaemon(): Promise<boolean> {
   const active = await ensureActiveProfile();
   if (!active) return false;
   return daemonLifecycleUnreachable(
-    async () => (await fetchHealthAtPort(active.port))?.os,
+    async () => (await fetchProfileHealth(active))?.os,
     normalizeHostOS(process.platform),
   );
 }
@@ -986,10 +995,7 @@ async function attemptDaemonRecovery(active: ActiveProfile): Promise<void> {
     // as process death, use an independent longer probe so a busy daemon is
     // not restarted merely because one health request was slow.
     confirmAlive: async () => {
-      const health = await fetchHealthAtPort(
-        active.port,
-        RECOVERY_HEALTH_PROBE_TIMEOUT_MS,
-      );
+      const health = await fetchProfileHealth(active, RECOVERY_HEALTH_PROBE_TIMEOUT_MS);
       if (!daemonStatusAlive(health?.status)) return false;
       externalDaemonObserved = isDaemonExternallyManaged(
         health?.os,
