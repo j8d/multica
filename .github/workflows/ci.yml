@@ -864,7 +864,9 @@ jobs:
 
       - name: Test shell installers
         if: runner.os != 'Windows'
-        run: bash scripts/install.test.sh
+        run: |
+          bash scripts/install.test.sh
+          bash scripts/install-macos-review.test.sh
 
       - name: Test installer with Windows PowerShell 5.1
         if: runner.os == 'Windows'

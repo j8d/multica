@@ -111,6 +111,8 @@
   "installer": [
     "scripts/install.sh",
     "scripts/install.test.sh",
+    "scripts/install-macos-review.sh",
+    "scripts/install-macos-review.test.sh",
     "scripts/install.ps1",
     "scripts/install.ps1.test.ps1",
     ".env.example",

@@ -6,9 +6,35 @@ work Mac; it does not grant permission to install or run the result there.
 Obtain security-team approval. Do not disable Gatekeeper, quarantine, MDM, or
 endpoint protection to install this build.
 
-## Build and download
+## Build and install
 
-After the PR adding the workflow is merged:
+On the approved Apple Silicon Mac, install and authenticate the GitHub CLI
+(`gh`), and install `jq`. Clone this fork once, after this installer PR is merged:
+
+```sh
+gh auth login
+gh repo clone j8d/multica "$HOME/multica-review"
+```
+
+After each successful review build from `main`, quit Multica and run:
+
+```sh
+bash "$HOME/multica-review/scripts/install-macos-review.sh"
+```
+
+This downloads the latest successful `main` run's named artifact, checks its
+run/commit provenance, both archive checksums, and the app's identity,
+architecture, and ad-hoc signature before installing into
+`~/Applications/Multica.app`. If an app already exists in `/Applications`, the
+script refuses to create a second copy. To replace that installation explicitly,
+use `bash "$HOME/multica-review/scripts/install-macos-review.sh" --app-dir /Applications`.
+The installer does not elevate privileges, start the app, or bypass OS security
+controls. If the destination is not writable or a managed Mac blocks the app,
+ask IT to deploy the approved artifact; do not disable those controls. A failed
+download or verification leaves the existing app untouched. The installed
+run ID and commit are printed on success.
+
+To download and inspect manually instead:
 
 1. Open this fork's **Actions → macOS ARM64 Review Build → Run workflow**.
 2. Select `main` (or a reviewed branch) and run it. The workflow runs on an
@@ -24,8 +50,8 @@ After the PR adding the workflow is merged:
    ```
 
 6. Give security the files, source commit/PR, and workflow URL. Only after
-   approval, mount the DMG and copy `Multica.app` to Applications, or follow
-   IT's deployment procedure. A DMG is not a managed `.pkg` installer.
+  approval, mount the DMG and copy `Multica.app` to Applications, or follow
+  IT's deployment procedure. A DMG is not a managed `.pkg` installer.
 
 Artifacts expire after 14 days. Re-running the selected reviewed source creates
 fresh artifacts; no GitHub Release, tag, container, Homebrew formula, or update
