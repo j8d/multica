@@ -78,15 +78,28 @@ mkdir "$work/extracted"
 ditto -x -k "$work/$zip" "$work/extracted"
 app="$work/extracted/Multica.app"
 cli="$app/Contents/Resources/app.asar.unpacked/resources/bin/multica"
-if [[ ! -d "$app" || -L "$app" ]] ||
-  [[ "$(plutil -extract CFBundleIdentifier raw -o - "$app/Contents/Info.plist")" != "ai.multica.desktop" ]] ||
-  [[ "$(plutil -extract CFBundleShortVersionString raw -o - "$app/Contents/Info.plist")" != "$version" ]] ||
-  [[ "$(lipo -archs "$app/Contents/MacOS/Multica")" != "arm64" ]] ||
-  [[ "$(lipo -archs "$cli")" != "arm64" ]] ||
-  ! codesign --verify --deep --strict "$app" ||
-  ! codesign --verify --strict "$cli" ||
-  ! codesign -dv --verbose=2 "$app" 2>&1 | grep -Fq 'Signature=adhoc'; then
-  echo "Review app identity, architecture, or signature check failed." >&2
+if [[ ! -d "$app" || -L "$app" ]]; then
+  echo "Review archive does not contain a regular Multica.app." >&2
+  exit 1
+fi
+if [[ "$(plutil -extract CFBundleIdentifier raw -o - "$app/Contents/Info.plist")" != "ai.multica.desktop" ]] ||
+  [[ "$(plutil -extract CFBundleShortVersionString raw -o - "$app/Contents/Info.plist")" != "$version" ]]; then
+  echo "Review app bundle identity or version does not match provenance." >&2
+  exit 1
+fi
+if [[ "$(lipo -archs "$app/Contents/MacOS/Multica")" != "arm64" ]] ||
+  [[ "$(lipo -archs "$cli")" != "arm64" ]]; then
+  echo "Review app or bundled CLI is not arm64." >&2
+  exit 1
+fi
+if ! codesign --verify --deep --strict "$app" ||
+  ! codesign --verify --strict "$cli"; then
+  echo "Review app or bundled CLI code signature verification failed." >&2
+  exit 1
+fi
+if ! signature_details="$(codesign -dv --verbose=2 "$app" 2>&1)" ||
+  [[ "$signature_details" != *'Signature=adhoc'* ]]; then
+  echo "Review app is not ad-hoc signed." >&2
   exit 1
 fi
 

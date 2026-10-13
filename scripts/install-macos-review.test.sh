@@ -9,10 +9,10 @@ setup_case() {
   mkdir -p "$tmp/bin" "$tmp/artifact" "$tmp/app/Contents" "$tmp/Applications/Multica.app/Contents"
   printf 'new\n' > "$tmp/app/Contents/build"
   printf 'old\n' > "$tmp/Applications/Multica.app/Contents/build"
-  printf 'zip\n' > "$tmp/artifact/multica-desktop-0.6.2-mac-arm64.zip"
-  printf 'dmg\n' > "$tmp/artifact/multica-desktop-0.6.2-mac-arm64.dmg"
-  (cd "$tmp/artifact" && shasum -a 256 multica-desktop-0.6.2-mac-arm64.{dmg,zip} > SHA256SUMS.txt)
-  printf '{"repository":"j8d/multica","commit":"%s","runUrl":"https://github.com/j8d/multica/actions/runs/123","architecture":"arm64","signing":"ad-hoc (no Developer ID)","notarized":false,"version":"0.6.2"}\n' "$COMMIT" > "$tmp/artifact/REVIEW-BUILD.json"
+  printf 'zip\n' > "$tmp/artifact/multica-desktop-0.6.1-55-gcc0e36d65-mac-arm64.zip"
+  printf 'dmg\n' > "$tmp/artifact/multica-desktop-0.6.1-55-gcc0e36d65-mac-arm64.dmg"
+  (cd "$tmp/artifact" && shasum -a 256 multica-desktop-0.6.1-55-gcc0e36d65-mac-arm64.{dmg,zip} > SHA256SUMS.txt)
+  printf '{"repository":"j8d/multica","commit":"%s","runUrl":"https://github.com/j8d/multica/actions/runs/123","architecture":"arm64","signing":"ad-hoc (no Developer ID)","notarized":false,"version":"0.6.1-55-gcc0e36d65"}\n' "$COMMIT" > "$tmp/artifact/REVIEW-BUILD.json"
 
   cat > "$tmp/bin/uname" <<'STUB'
 #!/usr/bin/env bash
@@ -54,7 +54,7 @@ STUB
 #!/usr/bin/env bash
 case "$2" in
   CFBundleIdentifier) echo ai.multica.desktop ;;
-  CFBundleShortVersionString) echo 0.6.2 ;;
+  CFBundleShortVersionString) echo "${REVIEW_TEST_BUNDLE_VERSION:-0.6.1-55-gcc0e36d65}" ;;
   *) exit 1 ;;
 esac
 STUB
@@ -68,7 +68,8 @@ STUB
   cat > "$tmp/bin/codesign" <<'STUB'
 #!/usr/bin/env bash
 if [[ "$1" == "-dv" ]]; then
-  echo 'Signature=adhoc' >&2
+  printf 'Signature=%s\n' "${REVIEW_TEST_SIGNATURE:-adhoc}" >&2
+  exec seq 1 10000 >&2
 fi
 STUB
   cat > "$tmp/bin/pgrep" <<'STUB'
@@ -116,9 +117,33 @@ test_rejects_modified_archive_without_replacement() {
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' RETURN
   setup_case "$tmp"
-  printf 'modified\n' > "$tmp/artifact/multica-desktop-0.6.2-mac-arm64.zip"
+  printf 'modified\n' > "$tmp/artifact/multica-desktop-0.6.1-55-gcc0e36d65-mac-arm64.zip"
   if run_installer "$tmp"; then
     echo "checksum mismatch must fail" >&2
+    return 1
+  fi
+  [[ "$(cat "$tmp/Applications/Multica.app/Contents/build")" == old ]]
+}
+
+test_rejects_wrong_bundle_version_without_replacement() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+  setup_case "$tmp"
+  if REVIEW_TEST_BUNDLE_VERSION=0.6.1 run_installer "$tmp"; then
+    echo "mismatched bundle version must fail" >&2
+    return 1
+  fi
+  [[ "$(cat "$tmp/Applications/Multica.app/Contents/build")" == old ]]
+}
+
+test_rejects_non_ad_hoc_signature_without_replacement() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+  setup_case "$tmp"
+  if REVIEW_TEST_SIGNATURE=none run_installer "$tmp"; then
+    echo "non-ad-hoc signature must fail" >&2
     return 1
   fi
   [[ "$(cat "$tmp/Applications/Multica.app/Contents/build")" == old ]]
@@ -151,6 +176,8 @@ test_restores_previous_app_on_swap_failure() {
 test_installs_verified_review_build
 test_rejects_mismatched_provenance_without_replacement
 test_rejects_modified_archive_without_replacement
+test_rejects_wrong_bundle_version_without_replacement
+test_rejects_non_ad_hoc_signature_without_replacement
 test_refuses_to_replace_running_app
 test_restores_previous_app_on_swap_failure
 echo "install-macos-review.sh tests passed"
