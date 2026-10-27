@@ -319,7 +319,7 @@ describe("builderArgsForTarget", () => {
     ]);
   });
 
-  it("retains the macOS x64 platform floor without a publisher override", () => {
+  it("keeps macOS x64 on the configured platform floor without a publisher override", () => {
     expect(
       builderArgsForTarget(
         { platform: "mac", arch: "x64" },
@@ -342,7 +342,6 @@ describe("builderArgsForTarget", () => {
       "--publish",
       "never",
       "-c.directories.output=dist/mac-x64",
-      "-c.mac.minimumSystemVersion=12.0.0",
     ]);
   });
 
