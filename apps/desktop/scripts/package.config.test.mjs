@@ -94,8 +94,8 @@ describe("effective electron-builder configuration", () => {
       expect(config.directories.output).toBe(
         `dist/${target.platform}-${target.arch}`,
       );
-      if (target.platform === "mac" && target.arch === "x64") {
-        expect(config.mac.minimumSystemVersion).toBe("12.0.0");
+      if (target.platform === "mac") {
+        expect(config.mac.minimumSystemVersion).toBe("13.0.0");
       }
     },
   );

@@ -340,11 +340,6 @@ export function builderArgsForTarget(
       `-c.directories.output=dist/${target.platform}-${target.arch}`,
     );
   }
-  if (target.platform === "mac" && target.arch === "x64") {
-    // Scope the Electron 39 platform floor to the new Intel package so this
-    // change does not rewrite established Apple Silicon bundle metadata.
-    builderArgs.push("-c.mac.minimumSystemVersion=12.0.0");
-  }
   return builderArgs;
 }
 
