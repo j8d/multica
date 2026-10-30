@@ -18,6 +18,7 @@ vi.mock("electron", () => ({
   app: {
     getAppPath: () => ctx.appPath,
     getPath: () => "/review/userData",
+    getPreferredSystemLanguages: () => ["en"],
     on: vi.fn(),
   },
   ipcMain: {
