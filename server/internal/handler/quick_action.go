@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -194,23 +195,6 @@ func normalizeQuickActionVisibility(raw string) (string, error) {
 }
 
 // Target resolution
-
-// quickActionTarget is the resolved execution target of an action: the agent
-// that will actually run, plus the display identity the client should show.
-// For a squad binding, Agent is the squad leader and Name is the SQUAD's name,
-// because the squad is what the user bound and what the mention will address.
-type quickActionTarget struct {
-	Agent     db.Agent
-	Name      string
-	AvatarURL string
-	// MentionType is the mention:// scheme the rendered comment must use so
-	// the existing trigger path routes it exactly as a hand-typed mention.
-	MentionType string
-	// MentionID is the id inside the mention link: the agent id, or the SQUAD
-	// id for a squad binding (the trigger path resolves the leader itself).
-	MentionID string
-	Found     bool
-}
 
 // resolveQuickActionTarget loads the execution target. A missing/archived
 // agent, or a missing/archived squad, resolves to Found=false — the caller
@@ -463,11 +447,34 @@ func (h *Handler) loadReachableQuickAction(
 		writeError(w, http.StatusNotFound, "quick action not found")
 		return db.QuickAction{}, false
 	}
-	if qa.Visibility == "private" && uuidToString(qa.CreatedByID) != userID {
-		writeError(w, http.StatusNotFound, "quick action not found")
-		return db.QuickAction{}, false
+	if qa.Visibility == "private" {
+		viewer := h.quickActionViewer(r, userID, workspaceID)
+		if !viewer.Valid || viewer != qa.CreatedByID {
+			writeError(w, http.StatusNotFound, "quick action not found")
+			return db.QuickAction{}, false
+		}
 	}
 	return qa, true
+}
+
+// quickActionViewer is the member whose private quick actions this request may
+// reach. A task token's user id is the runtime owner, not whoever started the
+// run, so a run another member started gets an invalid UUID: it matches no
+// creator and leaves only public actions. Lookup failures fail closed the same
+// way.
+func (h *Handler) quickActionViewer(r *http.Request, userID string, workspaceID pgtype.UUID) pgtype.UUID {
+	ok, err := h.requestRepresentsUser(r, userID, workspaceID)
+	if err != nil {
+		slog.Warn("resolve quick action viewer failed", append(logger.RequestAttrs(r), "error", err)...)
+	}
+	if !ok {
+		return pgtype.UUID{}
+	}
+	viewer, err := util.ParseUUID(userID)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return viewer
 }
 
 // requirePublicQuickActionRole gates writes that leave an action `public`.
@@ -482,7 +489,9 @@ func (h *Handler) requirePublicQuickActionRole(w http.ResponseWriter, r *http.Re
 // ListQuickActions returns the workspace catalog. It performs NO permission
 // work: `private` rows are scoped to their creator by the query (that is what
 // the field means, not a permission check), and every other row is returned to
-// everyone. Whether the caller may RUN one is answered by RunQuickAction.
+// everyone. Whether the caller may RUN one is answered by RunQuickAction. The
+// creator is matched against quickActionViewer, never the raw user id, because
+// a task token's user id is its runtime owner.
 func (h *Handler) ListQuickActions(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
@@ -493,8 +502,7 @@ func (h *Handler) ListQuickActions(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	viewerUUID, ok := parseUUIDOrBadRequest(w, userID, "user id")
-	if !ok {
+	if _, ok := parseUUIDOrBadRequest(w, userID, "user id"); !ok {
 		return
 	}
 
@@ -502,7 +510,7 @@ func (h *Handler) ListQuickActions(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.Queries.ListQuickActions(r.Context(), db.ListQuickActionsParams{
 		WorkspaceID:     wsUUID,
 		IncludeArchived: includeArchived,
-		ViewerID:        viewerUUID,
+		ViewerID:        h.quickActionViewer(r, userID, wsUUID),
 	})
 	if err != nil {
 		slog.Warn("list quick actions failed", append(logger.RequestAttrs(r), "error", err)...)
@@ -791,11 +799,9 @@ func (h *Handler) validateQuickActionBinding(w http.ResponseWriter, r *http.Requ
 
 // RenderQuickAction returns what the action WOULD post, without posting it.
 //
-// This backs the composer hand-off (the `/` slash command): the user gets the
-// fully rendered text in the comment box to edit before sending. Rendering
-// stays on the server even for this read-only path so there is exactly one
-// interpolation implementation — a client-side copy would drift from the run
-// path and quietly send something different from the preview.
+// Kept for installed clients that resolve draft text over HTTP. Current
+// clients build drafts from the catalog; shared fixtures keep that text aligned
+// with buildQuickActionBody. Invocation permission is checked again on send.
 func (h *Handler) RenderQuickAction(w http.ResponseWriter, r *http.Request) {
 	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
 	if !ok {
@@ -831,18 +837,6 @@ func (h *Handler) RenderQuickAction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"content": buildQuickActionBody(qa, target),
 	})
-}
-
-// buildQuickActionBody prepends the mention line that actually triggers the
-// run. It is parsed by the same ParseMentions the composer's output goes
-// through, so a quick action is indistinguishable from a hand-typed @mention
-// downstream. The prompt itself is passed through untouched — see the file
-// header for why there is no interpolation step.
-func buildQuickActionBody(qa db.QuickAction, target quickActionTarget) string {
-	if qa.AssigneeType == "" {
-		return qa.Prompt
-	}
-	return fmt.Sprintf("[@%s](mention://%s/%s)\n\n%s", target.Name, target.MentionType, target.MentionID, qa.Prompt)
 }
 
 // RunQuickAction renders the action and posts it as a quick_action comment,

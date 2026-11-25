@@ -21,14 +21,16 @@ type ModelPrice struct {
 }
 
 var modelPrices = map[string]ModelPrice{
-	// GPT-5.6 series and GPT-6 Astra (Codex `codex` provider). Official rates
-	// from OpenAI's GPT-5.6 announcement (openai.com/index/previewing-gpt-5-6-sol)
-	// and Astra's published $10 / $50. For 5.6+ (including Astra) cache read is
-	// generally the 90%-off cached-input rate (0.1x input). Cache write is billed
-	// at 1.25x the uncached input rate — unlike earlier OpenAI SKUs, which don't
-	// bill cache writes separately. Codex app-server v0.147 reports cache-write
-	// input separately while including it in the raw input total; the collector
-	// normalizes those into mutually exclusive billing buckets.
+	// GPT-5.6 series and GPT-6 (Codex `codex` provider): standard short-context
+	// rates from developers.openai.com/api/docs/pricing (2026-10-31). GPT-5.6
+	// Sol keeps its $5 / $30 list rate; the page's temporary promotional rate is
+	// deliberately not used. For 5.6+ (including Astra) cache read is generally
+	// the 90%-off cached-input rate (0.1x input). Cache write is billed at 1.25x
+	// the uncached input rate. Earlier OpenAI SKUs don't bill cache writes
+	// separately, so their written tokens bill as ordinary input and
+	// CacheWritePerM mirrors InputPerM. Codex app-server v0.147 reports
+	// cache-write input separately while including it in the raw input total;
+	// the collector normalizes those into mutually exclusive billing buckets.
 	"openai:gpt-6-astra": {Provider: "openai", Model: "gpt-6-astra", InputPerM: 10.00, CacheReadPerM: 1.00, CacheWritePerM: 12.50, OutputPerM: 50.00},
 	// Standard short-context rates from developers.openai.com/api/docs/models/.
 	// GPT-6.1 Sol and Terra cache at 0.05x input, not GPT-6 Sol's 0.1x.
@@ -37,13 +39,13 @@ var modelPrices = map[string]ModelPrice{
 	"openai:gpt-6-sol":     {Provider: "openai", Model: "gpt-6-sol", InputPerM: 2.00, CacheReadPerM: 0.20, CacheWritePerM: 2.50, OutputPerM: 10.00},
 	"openai:gpt-6-luna":    {Provider: "openai", Model: "gpt-6-luna", InputPerM: 0.10, CacheReadPerM: 0.01, CacheWritePerM: 0.125, OutputPerM: 0.50},
 	"openai:gpt-5.6-sol":   {Provider: "openai", Model: "gpt-5.6-sol", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 6.25, OutputPerM: 30.00},
-	"openai:gpt-5.6-terra": {Provider: "openai", Model: "gpt-5.6-terra", InputPerM: 2.50, CacheReadPerM: 0.25, CacheWritePerM: 3.125, OutputPerM: 15.00},
-	"openai:gpt-5.6-luna":  {Provider: "openai", Model: "gpt-5.6-luna", InputPerM: 1.00, CacheReadPerM: 0.10, CacheWritePerM: 1.25, OutputPerM: 6.00},
-	"openai:gpt-5.5":       {Provider: "openai", Model: "gpt-5.5", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 0.50, OutputPerM: 30.00},
-	"openai:gpt-5.4":       {Provider: "openai", Model: "gpt-5.4", InputPerM: 2.50, CacheReadPerM: 0.25, CacheWritePerM: 0.25, OutputPerM: 15.00},
-	"openai:gpt-5.4-mini":  {Provider: "openai", Model: "gpt-5.4-mini", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.075, OutputPerM: 4.50},
-	"openai:gpt-5.3-codex": {Provider: "openai", Model: "gpt-5.3-codex", InputPerM: 1.75, CacheReadPerM: 0.175, CacheWritePerM: 0.175, OutputPerM: 14.00},
-	"openai:gpt-5.2-codex": {Provider: "openai", Model: "gpt-5.2-codex", InputPerM: 1.75, CacheReadPerM: 0.175, CacheWritePerM: 0.175, OutputPerM: 14.00},
+	"openai:gpt-5.6-terra": {Provider: "openai", Model: "gpt-5.6-terra", InputPerM: 2.00, CacheReadPerM: 0.20, CacheWritePerM: 2.50, OutputPerM: 12.00},
+	"openai:gpt-5.6-luna":  {Provider: "openai", Model: "gpt-5.6-luna", InputPerM: 0.20, CacheReadPerM: 0.02, CacheWritePerM: 0.25, OutputPerM: 1.20},
+	"openai:gpt-5.5":       {Provider: "openai", Model: "gpt-5.5", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 5.00, OutputPerM: 30.00},
+	"openai:gpt-5.4":       {Provider: "openai", Model: "gpt-5.4", InputPerM: 2.50, CacheReadPerM: 0.25, CacheWritePerM: 2.50, OutputPerM: 15.00},
+	"openai:gpt-5.4-mini":  {Provider: "openai", Model: "gpt-5.4-mini", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.75, OutputPerM: 4.50},
+	"openai:gpt-5.3-codex": {Provider: "openai", Model: "gpt-5.3-codex", InputPerM: 1.75, CacheReadPerM: 0.175, CacheWritePerM: 1.75, OutputPerM: 14.00},
+	"openai:gpt-5.2-codex": {Provider: "openai", Model: "gpt-5.2-codex", InputPerM: 1.75, CacheReadPerM: 0.175, CacheWritePerM: 1.75, OutputPerM: 14.00},
 	// Anthropic's Sonnet 5 launch price is $2 / $10 through 2026-08-31. This
 	// static table cannot schedule the published post-intro $3 / $15 change yet,
 	// so keep the intro rate here and update the row when catalog support exists.
@@ -52,7 +54,9 @@ var modelPrices = map[string]ModelPrice{
 	// Haiku 5.5 uses the <=100K prompt tier, matching the frontend estimate.
 	// Above 100K (including cache reads/writes), all four rates are 5x higher.
 	// Usage aggregates lack per-request prompt sizes, so long requests are underestimated.
-	"anthropic:claude-haiku-5-5":  {Provider: "anthropic", Model: "claude-haiku-5-5", InputPerM: 0.10, CacheReadPerM: 0.01, CacheWritePerM: 0.125, OutputPerM: 0.50},
+	"anthropic:claude-haiku-5-5": {Provider: "anthropic", Model: "claude-haiku-5-5", InputPerM: 0.10, CacheReadPerM: 0.01, CacheWritePerM: 0.125, OutputPerM: 0.50},
+	// Fable 5.2 (anthropic.com/pricing): $8 / $40, cache read $0.20, cache write $10.
+	"anthropic:claude-fable-5-2":  {Provider: "anthropic", Model: "claude-fable-5-2", InputPerM: 8.00, CacheReadPerM: 0.20, CacheWritePerM: 10.00, OutputPerM: 40.00},
 	"anthropic:claude-fable-5-1":  {Provider: "anthropic", Model: "claude-fable-5-1", InputPerM: 10.00, CacheReadPerM: 0.25, CacheWritePerM: 12.50, OutputPerM: 50.00},
 	"anthropic:claude-fable-5":    {Provider: "anthropic", Model: "claude-fable-5", InputPerM: 10.00, CacheReadPerM: 1.00, CacheWritePerM: 12.50, OutputPerM: 50.00},
 	"anthropic:claude-opus-5-5":   {Provider: "anthropic", Model: "claude-opus-5-5", InputPerM: 4.00, CacheReadPerM: 0.20, CacheWritePerM: 5.00, OutputPerM: 20.00},
@@ -70,11 +74,18 @@ var modelPrices = map[string]ModelPrice{
 	// USD rates because rollups lack each request's pricing window. Off-peak
 	// costs half as much; reseller prices can also differ. Cache writes bill
 	// as ordinary input. Mirror packages/views/runtimes/utils.ts.
-	"deepseek:v4.1-flash":    {Provider: "deepseek", Model: "v4.1-flash", InputPerM: 0.30, CacheReadPerM: 0.006, CacheWritePerM: 0.30, OutputPerM: 1.20},
+	"deepseek:v4.1-flash": {Provider: "deepseek", Model: "v4.1-flash", InputPerM: 0.30, CacheReadPerM: 0.006, CacheWritePerM: 0.30, OutputPerM: 1.20},
+	// MiniMax-M3 standard-tier estimate (https://platform.minimax.io/docs/pricing/overview).
+	// Usage aggregates multiple requests, so it cannot identify individual >512K
+	// inputs. As with xAI below, use the standard tier; long requests may be
+	// underestimated. Cache writes mirror input for newly cached input tokens,
+	// not an additional write fee (https://platform.minimax.io/docs/api-reference/text-prompt-caching).
+	"minimax:m3":             {Provider: "minimax", Model: "m3", InputPerM: 0.30, CacheReadPerM: 0.06, CacheWritePerM: 0.30, OutputPerM: 1.20},
 	"minimax:m2.7":           {Provider: "minimax", Model: "m2.7", InputPerM: 0.30, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 1.20},
 	"minimax:m2.7-highspeed": {Provider: "minimax", Model: "m2.7-highspeed", InputPerM: 0.60, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 2.40},
 	// Google standard token prices: ai.google.dev/gemini-api/docs/pricing
-	// (2026-10-19). Mirror packages/views/runtimes/utils.ts.
+	// (2026-10-19; Gemini 4 Neon and Hydrogen 2026-11-23). Mirror
+	// packages/views/runtimes/utils.ts.
 	// Argon's intro rate expires 2026-11-30; Flash 3.6/3.8, Robotics and
 	// 3.8 TTS promotions expire 2026-12-31. Update these static rows at expiry.
 	// As documented at ai.google.dev/gemini-api/docs/deprecations, 3.5 Flash
@@ -85,7 +96,10 @@ var modelPrices = map[string]ModelPrice{
 	// buckets are 0. Speech-only SKUs have a fixed rate per input/output bucket.
 	// Mixed-modality Live/Image/Omni/Embedding, grounding and hourly cache
 	// storage cannot be inferred from these token totals.
+	"google:gemini-4-neon":                          {Provider: "google", Model: "gemini-4-neon", InputPerM: 3, CacheReadPerM: 0.15, CacheWritePerM: 3, OutputPerM: 15},
+	"google:gemini-4-hydrogen":                      {Provider: "google", Model: "gemini-4-hydrogen", InputPerM: 1.5, CacheReadPerM: 0.075, CacheWritePerM: 1.5, OutputPerM: 7.5},
 	"google:gemini-4-argon":                         {Provider: "google", Model: "gemini-4-argon", InputPerM: 2, CacheReadPerM: 0.1, CacheWritePerM: 2, OutputPerM: 10},
+	"google:gemini-4-carbon":                        {Provider: "google", Model: "gemini-4-carbon", InputPerM: 2, CacheReadPerM: 0.1, CacheWritePerM: 2, OutputPerM: 10}, // shares Argon's intro rate through 2026-11-30 (checked 2026-11-11)
 	"google:gemini-3.8-flash":                       {Provider: "google", Model: "gemini-3.8-flash", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.75, OutputPerM: 3.75},
 	"google:gemini-3.7-flash":                       {Provider: "google", Model: "gemini-3.7-flash", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.75, OutputPerM: 3.75},
 	"google:gemini-3.6-flash":                       {Provider: "google", Model: "gemini-3.6-flash", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.75, OutputPerM: 3.75},
@@ -147,6 +161,13 @@ var modelPrices = map[string]ModelPrice{
 	// providers/moonshotai/models/kimi-k3.toml). Moonshot bills no separate
 	// cache write, so CacheWritePerM mirrors Input.
 	"moonshotai:kimi-k3": {Provider: "moonshotai", Model: "kimi-k3", InputPerM: 3.0, CacheReadPerM: 0.30, CacheWritePerM: 3.0, OutputPerM: 15.0},
+	// Kimi K3.1 Pro (platform.kimi.ai/docs/pricing/chat via models.dev
+	// providers/moonshotai/models/kimi-k3.1-pro.toml, 2026-11-11); default 5m
+	// cache write is 1x Input, like kimi-k3.
+	"moonshotai:kimi-k3.1-pro": {Provider: "moonshotai", Model: "kimi-k3.1-pro", InputPerM: 2.0, CacheReadPerM: 0.20, CacheWritePerM: 2.0, OutputPerM: 10.0},
+	// GLM-5.3 / GLM-5.3-Flash (docs.z.ai/guides/overview/pricing, 2026-11-11); the 5.3 Flash tier is paid.
+	"zai:glm-5.3":       {Provider: "zai", Model: "glm-5.3", InputPerM: 1.4, CacheReadPerM: 0.26, CacheWritePerM: 1.4, OutputPerM: 4.4},
+	"zai:glm-5.3-flash": {Provider: "zai", Model: "glm-5.3-flash", InputPerM: 0.15, CacheReadPerM: 0.03, CacheWritePerM: 0.15, OutputPerM: 0.5},
 	// Volcengine Ark (ark.cn-beijing.volces.com). `ark-code-latest` is a
 	// rolling alias whose target can be switched in the Volcengine console
 	// (across model families), so it is not a stable model identity; the
@@ -214,6 +235,7 @@ var modelAliasRules = []struct {
 	// cache reads at 0.025x input ($0.25) instead of the standard 0.1x, so it
 	// needs its own row, and both rules end at their own version
 	// (claudeVersionEnd) so neither can swallow the other's ids.
+	{regexp.MustCompile(`claude-fable-5[-.]2` + claudeVersionEnd), "anthropic:claude-fable-5-2"},
 	{regexp.MustCompile(`claude-fable-5[-.]1` + claudeVersionEnd), "anthropic:claude-fable-5-1"},
 	{regexp.MustCompile(`claude-fable-5` + claudeVersionEnd), "anthropic:claude-fable-5"},
 	// Opus 5.5 is cheaper than Opus 5 ($4 / $20) and prices cache reads at
@@ -234,11 +256,15 @@ var modelAliasRules = []struct {
 	// and the 1017 snapshot resolve, matching the frontend's exact keys.
 	{regexp.MustCompile(`(^|/|:)deepseek-(?:flash|v4-flash(?:-vision-exp)?|v4\.1-flash(?:-1017)?|chat|reasoner)$`), "deepseek:v4.1-flash"},
 	{regexp.MustCompile(`deepseek-v4-pro`), "deepseek:v4-pro"},
+	{regexp.MustCompile(`(^|/|:)minimax-m3$`), "minimax:m3"},
 	{regexp.MustCompile(`minimax-m2[.]7.*highspeed|highspeed.*minimax-m2[.]7`), "minimax:m2.7-highspeed"},
 	{regexp.MustCompile(`minimax-m2[.]7`), "minimax:m2.7"},
 	// Each Gemini SKU is exact: an image/audio/preview variant must never
 	// inherit the nearest text model rate. Known efforts normalize below.
+	{regexp.MustCompile(`(^|/|:)gemini-4-neon$`), "google:gemini-4-neon"},
+	{regexp.MustCompile(`(^|/|:)gemini-4-hydrogen$`), "google:gemini-4-hydrogen"},
 	{regexp.MustCompile(`(^|/|:)gemini-4-argon$`), "google:gemini-4-argon"},
+	{regexp.MustCompile(`(^|/|:)gemini-4-carbon$`), "google:gemini-4-carbon"},
 	{regexp.MustCompile(`(^|/|:)gemini-3\.8-flash$`), "google:gemini-3.8-flash"},
 	{regexp.MustCompile(`(^|/|:)gemini-3\.7-flash$`), "google:gemini-3.7-flash"},
 	{regexp.MustCompile(`(^|/|:)gemini-3\.6-flash$`), "google:gemini-3.6-flash"},
@@ -290,6 +316,13 @@ var modelAliasRules = []struct {
 	// unmapped; `kimi-code/k3` (Kimi Code CLI) resolves via the `/k3$` form.
 	{regexp.MustCompile(`(^|/|:)kimi-k3$`), "moonshotai:kimi-k3"},
 	{regexp.MustCompile(`(^|/|:)k3$`), "moonshotai:kimi-k3"},
+	// Kimi K3.1 Pro. Anchored so CodeBuddy's `kimi-k3-1` and the highspeed
+	// SKU stay unmapped; `kimi-code/k3.1-pro` resolves via the `/k3.1-pro$` form.
+	{regexp.MustCompile(`(^|/|:)kimi-k3\.1-pro$`), "moonshotai:kimi-k3.1-pro"},
+	{regexp.MustCompile(`(^|/|:)k3\.1-pro$`), "moonshotai:kimi-k3.1-pro"},
+	// Zhipu GLM-5.3. Anchored so unknown suffixed variants stay unmapped.
+	{regexp.MustCompile(`(^|/|:)glm-5\.3$`), "zai:glm-5.3"},
+	{regexp.MustCompile(`(^|/|:)glm-5\.3-flash$`), "zai:glm-5.3-flash"},
 	// Volcengine Ark `ark-code-latest` is deliberately absent: it is a
 	// console-switchable rolling alias across model families, not a stable
 	// model identity, so it stays unmapped.
@@ -306,8 +339,33 @@ var contextTagRe = regexp.MustCompile(`\[[^\]]+\]$`)
 // Antigravity reports a display label or an effort-suffixed model ID. Effort
 // selects reasoning, not a different SKU. Only strip known effort spellings;
 // unknown variants must remain unpriced instead of borrowing a family's rate.
-var geminiDisplayNameRe = regexp.MustCompile(`(^|/|:)gemini ([0-9]+(?:\.[0-9]+)?) (flash(?:-lite)?|pro|argon)(?: \((?:minimal|low|medium|high)\))?$`)
-var geminiEffortSuffixRe = regexp.MustCompile(`((?:^|/|:)gemini-[0-9]+(?:\.[0-9]+)?-(?:flash(?:-lite)?|pro|argon))-(?:minimal|low|medium|high)$`)
+// Neon and Hydrogen add a fourth level, labeled `Extra` in the picker and
+// `xhigh` in catalog ids (`gemini-4-neon-xhigh`).
+var geminiDisplayNameRe = regexp.MustCompile(`(^|/|:)gemini ([0-9]+(?:\.[0-9]+)?) (flash(?:-lite)?|pro|argon|carbon|hydrogen|neon)(?: \((?:minimal|low|medium|high|extra)\))?$`)
+var geminiEffortSuffixRe = regexp.MustCompile(`((?:^|/|:)gemini-[0-9]+(?:\.[0-9]+)?-(?:flash(?:-lite)?|pro|argon|carbon|hydrogen|neon))-(?:minimal|low|medium|high|xhigh)$`)
+
+// Antigravity also labels Claude models with the reasoning effort or its
+// Thinking mode, as a slug suffix (`claude-opus-5-5-high`,
+// `claude-opus-4-6-thinking`) or a display label (`Claude Opus 5.5 (High)`,
+// `Claude Opus 5.5 (Thinking)`). Both select reasoning, not a different SKU:
+// Anthropic bills thinking tokens as output at the model's own rate. Scoped
+// to the Antigravity runtime because Cursor ids carry the same suffixes at
+// Cursor-specific rates and a bare `claude-opus-5-5-high` elsewhere stays
+// unmapped. Mirrors pricingCandidates in packages/views/runtimes/utils.ts.
+var antigravityClaudeDisplayRe = regexp.MustCompile(`^(?:[a-z][a-z0-9_-]*[/:])*claude (opus|sonnet|haiku|fable) ([0-9]+(?:[.-][0-9]+)?)(?: \((?:minimal|low|medium|high|thinking)\))?$`)
+var antigravityClaudeEffortRe = regexp.MustCompile(`^(?:[a-z][a-z0-9_-]*[/:])*(claude-(?:opus|sonnet|haiku|fable)-[0-9]+(?:[.-][0-9]+)?)-(?:minimal|low|medium|high|thinking)$`)
+
+// Antigravity serves GPT-OSS 120B (`GPT-OSS 120B (Medium)`) from Google
+// Cloud, so it prices at Vertex AI's gpt-oss-120b list rate
+// (cloud.google.com/model-garden/partner-models/pricing, 2026-11-23), which
+// publishes no cache-hit rate: cached tokens bill as input. Scoped to
+// Antigravity because other runtimes reach gpt-oss through hosts with their
+// own rates. Orchestrator (`Orchestrator (Neon)`, `gemini-pro-orchestrator`)
+// stays unmapped: it splits a turn between a planner and an executor model,
+// so no single rate fits its aggregated usage.
+var antigravityGPTOSS120BRe = regexp.MustCompile(`^(?:[a-z][a-z0-9_-]*[/:])*gpt-oss(?:-120b(?:-(?:low|medium|high))?| 120b(?: \((?:low|medium|high)\))?)$`)
+
+var antigravityGPTOSS120BPrice = ModelPrice{Provider: "google", Model: "gpt-oss-120b", InputPerM: 0.09, CacheReadPerM: 0.09, CacheWritePerM: 0.09, OutputPerM: 0.36}
 
 func matchModelAlias(model string) (ModelPrice, bool) {
 	model = geminiDisplayNameRe.ReplaceAllString(model, "${1}gemini-${2}-${3}")
@@ -369,6 +427,27 @@ func PriceForModelAlias(model string) (ModelPrice, bool) {
 			return ModelPrice{}, false
 		}
 		return matchModelAlias(stripped)
+	}
+	return ModelPrice{}, false
+}
+
+// priceForAntigravityModel prices usage reported by the Antigravity runtime:
+// after the general resolver misses, retry the Claude effort/display forms,
+// then GPT-OSS 120B. One trailing context tag is the same SKU; the `$` anchor
+// rejects a second.
+func priceForAntigravityModel(model string) (ModelPrice, bool) {
+	if price, ok := PriceForModelAlias(model); ok {
+		return price, true
+	}
+	s := contextTagRe.ReplaceAllString(strings.ToLower(strings.TrimSpace(model)), "")
+	if m := antigravityClaudeDisplayRe.FindStringSubmatch(s); m != nil {
+		return PriceForModelAlias("claude-" + m[1] + "-" + strings.ReplaceAll(m[2], ".", "-"))
+	}
+	if m := antigravityClaudeEffortRe.FindStringSubmatch(s); m != nil {
+		return PriceForModelAlias(strings.ReplaceAll(m[1], ".", "-"))
+	}
+	if antigravityGPTOSS120BRe.MatchString(s) {
+		return antigravityGPTOSS120BPrice, true
 	}
 	return ModelPrice{}, false
 }

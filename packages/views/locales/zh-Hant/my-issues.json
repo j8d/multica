@@ -2,19 +2,19 @@
   "page": {
     "breadcrumb": "我的任務",
     "workspace_fallback": "工作區",
-    "empty_title": "沒有分配給你的任務",
-    "empty_description": "你建立或被分配到的任務會顯示在這裡。"
+    "empty_title": "暫無任務",
+    "empty_description": "指派給你、由你建立，或涉及你的 AI 代理與小隊的任務會顯示在這裡。"
   },
   "header": {
     "scope": {
       "all_label": "全部",
-      "all_description": "分給我的、我建立的、或我的智慧體和小隊相關的",
+      "all_description": "分給我的、我建立的、或我的 AI 代理和小隊相關的",
       "assigned_label": "已分配",
       "assigned_description": "分配給我的任務",
       "created_label": "我建立的",
       "created_description": "我建立的任務",
-      "agents_label": "我的智慧體和小隊",
-      "agents_description": "分配給我的智慧體的任務"
+      "agents_label": "我的 AI 代理和小隊",
+      "agents_description": "指派給我的 AI 代理與小隊的任務"
     },
     "filter_button": "篩選",
     "filter_status": "狀態",

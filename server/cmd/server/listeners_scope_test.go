@@ -71,7 +71,7 @@ func onlyOwnerWorkspaceFrame(t *testing.T, fb *fakeBroadcaster, workspaceID, own
 	fb.mu.Lock()
 	defer fb.mu.Unlock()
 	if len(fb.workspaceCalls) != 0 || len(fb.userCalls) != 0 || fb.broadcastCalled != 0 {
-		t.Fatalf("chat content left the owner's workspace connections: workspace=%+v user=%+v broadcast=%d",
+		t.Fatalf("private content left the owner's workspace connections: workspace=%+v user=%+v broadcast=%d",
 			fb.workspaceCalls, fb.userCalls, fb.broadcastCalled)
 	}
 	want := realtime.WorkspaceMemberScopeID(workspaceID, ownerID)
@@ -274,6 +274,90 @@ func TestRegisterListeners_ChatRoutingKeepsInProcessListeners(t *testing.T) {
 	}
 }
 
+// A pin is one member's own in every workspace, with or without a private
+// project: one published without its member reaches nobody.
+func TestRegisterListeners_PinEventsWithoutMemberAreDropped(t *testing.T) {
+	for _, eventType := range []string{protocol.EventPinCreated, protocol.EventPinDeleted, protocol.EventPinReordered} {
+		t.Run(eventType, func(t *testing.T) {
+			bus := events.New()
+			fb := &fakeBroadcaster{}
+			registerListeners(bus, fb)
+
+			bus.Publish(events.Event{
+				Type: eventType, WorkspaceID: "ws-1", ActorType: "member", ActorID: "owner-1",
+				Payload: map[string]any{"item_type": "issue", "item_id": "issue-1"},
+			})
+
+			fb.mu.Lock()
+			defer fb.mu.Unlock()
+			if len(fb.workspaceCalls) != 0 || len(fb.scopeCalls) != 0 || len(fb.userCalls) != 0 || fb.broadcastCalled != 0 {
+				t.Fatalf("pin event was delivered: workspace=%+v scope=%+v user=%+v broadcast=%d",
+					fb.workspaceCalls, fb.scopeCalls, fb.userCalls, fb.broadcastCalled)
+			}
+		})
+	}
+}
+
+func TestRegisterListeners_MemberPrivateEventsGoOnlyToThatMember(t *testing.T) {
+	for _, eventType := range []string{
+		protocol.EventIssueViewPreferenceChanged, protocol.EventIssueViewChanged,
+		protocol.EventPinCreated, protocol.EventPinDeleted, protocol.EventPinReordered,
+	} {
+		t.Run(eventType, func(t *testing.T) {
+			bus := events.New()
+			fb := &fakeBroadcaster{}
+			registerListeners(bus, fb)
+
+			bus.Publish(events.Event{
+				Type: eventType, WorkspaceID: "ws-1", ActorType: "member", ActorID: "owner-1",
+				MemberPrivateUserID: "owner-1",
+				Payload:             map[string]any{"view_id": "view-1"},
+			})
+
+			msg := onlyOwnerWorkspaceFrame(t, fb, "ws-1", "owner-1")
+			var frame struct {
+				Type string `json:"type"`
+			}
+			if err := json.Unmarshal(msg, &frame); err != nil || frame.Type != eventType {
+				t.Fatalf("member frame type = %q (%v), want %q", frame.Type, err, eventType)
+			}
+		})
+	}
+}
+
+// Preferences have no audience but their owner: without one, nobody hears it.
+func TestRegisterListeners_PreferenceEventWithoutMemberIsDropped(t *testing.T) {
+	bus := events.New()
+	fb := &fakeBroadcaster{}
+	registerListeners(bus, fb)
+
+	bus.Publish(events.Event{
+		Type: protocol.EventIssueViewPreferenceChanged, WorkspaceID: "ws-1", ActorType: "member", ActorID: "owner-1",
+		Payload: map[string]any{"scope_type": "sidebar_projects"},
+	})
+
+	if len(fb.workspaceCalls) != 0 || len(fb.userCalls) != 0 || len(fb.scopeCalls) != 0 || fb.broadcastCalled != 0 {
+		t.Fatalf("preference event without a member was delivered: workspace=%+v user=%+v scope=%+v broadcast=%d",
+			fb.workspaceCalls, fb.userCalls, fb.scopeCalls, fb.broadcastCalled)
+	}
+}
+
+// A shared view's change is news to the whole workspace.
+func TestRegisterListeners_SharedIssueViewChangeGoesToWorkspace(t *testing.T) {
+	bus := events.New()
+	fb := &fakeBroadcaster{}
+	registerListeners(bus, fb)
+
+	bus.Publish(events.Event{
+		Type: protocol.EventIssueViewChanged, WorkspaceID: "ws-1", ActorType: "member", ActorID: "owner-1",
+		Payload: map[string]any{"view_id": "view-1", "action": "updated"},
+	})
+
+	if len(fb.scopeCalls) != 0 || len(fb.workspaceCalls) != 1 || fb.workspaceCalls[0].workspaceID != "ws-1" {
+		t.Fatalf("shared view change fanout: scope=%+v workspace=%+v, want ws-1 once", fb.scopeCalls, fb.workspaceCalls)
+	}
+}
+
 // An invitation conclusion must reach the invitee BOTH ways: the workspace
 // broadcast keeps admin pending lists fresh, and a targeted send reaches the
 // invitee's own clients — which are usually bound to a different workspace
@@ -369,6 +453,25 @@ func TestRegisterListeners_InvitationRevokedStillTargetsInviteeNotActor(t *testi
 	}
 	if len(fb.userCalls) != 1 || fb.userCalls[0].userID != "invitee-2" {
 		t.Fatalf("revoked fanout = %+v, want invitee-2 only", fb.userCalls)
+	}
+}
+
+func TestRegisterListeners_InboxUnreadGoesOnlyToRecipient(t *testing.T) {
+	bus := events.New()
+	fb := &fakeBroadcaster{}
+	registerListeners(bus, fb)
+
+	bus.Publish(events.Event{
+		Type: protocol.EventInboxUnread, WorkspaceID: "ws-1",
+		ActorType: "member", ActorID: "user-1",
+		Payload: map[string]any{"item_id": "item-1", "recipient_id": "user-1"},
+	})
+
+	if len(fb.workspaceCalls) != 0 {
+		t.Fatalf("inbox:unread leaked to workspace fanout: %+v", fb.workspaceCalls)
+	}
+	if len(fb.userCalls) != 1 || fb.userCalls[0].userID != "user-1" {
+		t.Fatalf("inbox:unread fanout = %+v, want user-1 only", fb.userCalls)
 	}
 }
 

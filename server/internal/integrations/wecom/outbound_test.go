@@ -120,6 +120,9 @@ type fakeOutboundQueries struct {
 	deliveryFiled      *bool
 	perTaskDelivery    map[string]bool
 	sessionChannelType string
+	// transcript is task_message as the bubble reads it back
+	// (ListTaskProgressSince). nil reads as a table with no rows.
+	transcript *fakeTranscript
 	// t is who an unset stamp is reported to. fileTask sets it, and a filed
 	// row is the only route to the origin gate, so it is always there by the
 	// time the gate reads.
@@ -949,7 +952,7 @@ func TestInboxActorAgent(t *testing.T) {
 
 // agentInboxItem is one issue-comment notification as the listeners publish
 // it: a member recipient, and the agent whose comment it is as the actor —
-// behind pointers, which is how inboxItemToResponse builds the map.
+// behind pointers, which is how inbox.Deliver builds the map.
 func agentInboxItem(notifType, agentID string) map[string]any {
 	return map[string]any{
 		"recipient_type": "member",
