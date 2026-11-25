@@ -16,6 +16,10 @@ import (
 	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
+// agentBuilderSystemKeyPrefix marks the hidden execution carrier behind an
+// AI agent-creation flow. The suffix is the flow id.
+const agentBuilderSystemKeyPrefix = "agent_builder:"
+
 const agentBuilderInstructions = `You are Multica Agent Builder. Help the user design one practical AI agent through a short conversation.
 
 Your job is to propose and refine configuration, never to create resources yourself. Ask only questions that materially change behavior. Prefer making a reasonable draft immediately, then ask at most two focused questions per turn.
@@ -58,6 +62,9 @@ func (h *Handler) CreateAgentBuilderSession(w http.ResponseWriter, r *http.Reque
 	workspaceID := h.resolveWorkspaceID(r)
 	userID, ok := requireUserID(w, r)
 	if !ok {
+		return
+	}
+	if !h.requireChatOwnerAccess(w, r, userID, workspaceID) {
 		return
 	}
 
@@ -204,6 +211,9 @@ func (h *Handler) ListAgentBuilderSessions(w http.ResponseWriter, r *http.Reques
 	workspaceID := h.resolveWorkspaceID(r)
 	userID, ok := requireUserID(w, r)
 	if !ok {
+		return
+	}
+	if !h.requireChatOwnerAccess(w, r, userID, workspaceID) {
 		return
 	}
 	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")

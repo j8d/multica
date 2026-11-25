@@ -64,6 +64,9 @@ func TestMain(m *testing.M) {
 	case "usage_fixture":
 		runFakeClaudeUsageFixture()
 		os.Exit(0)
+	case "pending_control_result":
+		runFakeClaudePendingControlResult()
+		os.Exit(0)
 	case "supplement":
 		runFakeClaudeSupplement()
 		os.Exit(0)
@@ -75,6 +78,9 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	case "background_control_request":
 		runFakeClaudeBackgroundControlRequest()
+		os.Exit(0)
+	case "resume_interrupted_turn":
+		runFakeClaudeResumeInterruptedTurn()
 		os.Exit(0)
 	case "async_launched_tool_result":
 		runFakeClaudeAsyncLaunchedToolResult()

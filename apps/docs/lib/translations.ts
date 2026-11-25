@@ -18,6 +18,20 @@ export const uiTranslations: Partial<Record<Lang, Partial<Translations>>> = {
     "Toggle Theme(theme switcher)(aria-label)": "切换主题",
     "Edit on GitHub(edit page)": "在 GitHub 上编辑",
   },
+  "zh-Hant": {
+    "Search(search trigger)": "搜尋",
+    "Search(search dialog)": "搜尋",
+    "No results found(search dialog)": "找不到結果",
+    "On this page(table of contents)": "本頁目錄",
+    "No Headings(table of contents)": "沒有章節",
+    "Last updated on(page footer)": "最後更新於",
+    "Choose a language(language switcher)": "選擇語言",
+    "Choose a language(language switcher)(aria-label)": "選擇語言",
+    "Next Page(pagination)": "下一頁",
+    "Previous Page(pagination)": "上一頁",
+    "Toggle Theme(theme switcher)(aria-label)": "切換主題",
+    "Edit on GitHub(edit page)": "在 GitHub 上編輯",
+  },
   ko: {
     "Search(search trigger)": "검색",
     "Search(search dialog)": "검색",
@@ -66,6 +80,7 @@ export const uiTranslations: Partial<Record<Lang, Partial<Translations>>> = {
 export const localeLabels: Record<Lang, string> = {
   en: "English",
   zh: "简体中文",
+  "zh-Hant": "繁體中文",
   ko: "한국어",
   ja: "日本語",
   fr: "Français",
@@ -85,6 +100,12 @@ export const homeCopy = {
     titleLead: "Multica 是人类与 AI 智能体",
     titleAccent: "共同工作的地方。",
     byline: ["开始使用", "2026 年 7 月更新", "阅读约 2 分钟"],
+  },
+  "zh-Hant": {
+    eyebrow: "Multica 文件",
+    titleLead: "Multica 是人類與 AI 代理",
+    titleAccent: "共同工作的地方。",
+    byline: ["開始使用", "2026 年 7 月更新", "閱讀約 2 分鐘"],
   },
   ko: {
     eyebrow: "Multica 문서",
@@ -106,12 +127,13 @@ export const homeCopy = {
   },
 } as const satisfies Record<Lang, unknown>;
 
-// Chrome around the interactive demos embedded in docs pages. Each demo keeps
+// Chrome around the editorial demos embedded in docs pages. Each demo keeps
 // its own scenario copy next to its component.
 export const demoChromeCopy = {
-  en: { label: "Try it", replay: "Replay", click: "Click" },
-  zh: { label: "动手试试", replay: "重新演示", click: "点击" },
-  ko: { label: "직접 해보기", replay: "다시 보기", click: "클릭" },
-  ja: { label: "試してみる", replay: "もう一度", click: "クリック" },
-  fr: { label: "Essayez", replay: "Rejouer", click: "Cliquez" },
+  en: { play: "Play", pause: "Pause", replay: "Replay", reset: "Reset" },
+  zh: { play: "播放", pause: "暂停", replay: "重播", reset: "重置" },
+  "zh-Hant": { play: "播放", pause: "暫停", replay: "重播", reset: "重設" },
+  ko: { play: "재생", pause: "일시정지", replay: "다시 보기", reset: "초기화" },
+  ja: { play: "再生", pause: "一時停止", replay: "もう一度", reset: "リセット" },
+  fr: { play: "Lire", pause: "Pause", replay: "Rejouer", reset: "Réinitialiser" },
 } as const satisfies Record<Lang, unknown>;

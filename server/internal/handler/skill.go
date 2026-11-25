@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,6 +43,15 @@ func sanitizeNullBytes(s string) string {
 	return util.SanitizeTextForPostgres(s)
 }
 
+// sanitizeNullBytesPtr is sanitizeNullBytes for an optional request field.
+func sanitizeNullBytesPtr(s *string) *string {
+	if s == nil {
+		return nil
+	}
+	clean := sanitizeNullBytes(*s)
+	return &clean
+}
+
 // --- Response structs ---
 
 type SkillResponse struct {
@@ -51,6 +61,7 @@ type SkillResponse struct {
 	Description string  `json:"description"`
 	Content     string  `json:"content"`
 	Config      any     `json:"config"`
+	Revision    int64   `json:"revision"`
 	CreatedBy   *string `json:"created_by"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
@@ -142,6 +153,7 @@ type SkillWithFilesResponse struct {
 // how large the skill is and which part of it is large.
 type SkillWithFileMetadataResponse struct {
 	SkillSummaryResponse
+	Revision int64 `json:"revision"`
 	// ContentSize / ContentHash describe the SKILL.md body that `content`
 	// would have carried.
 	ContentSize int64                       `json:"content_size"`
@@ -178,6 +190,7 @@ func skillToResponse(s db.Skill) SkillResponse {
 		Description: s.Description,
 		Content:     s.Content,
 		Config:      decodeSkillConfig(s.Config),
+		Revision:    s.Revision,
 		CreatedBy:   uuidToPtr(s.CreatedBy),
 		CreatedAt:   timestampToString(s.CreatedAt),
 		UpdatedAt:   timestampToString(s.UpdatedAt),
@@ -294,6 +307,15 @@ type UpdateSkillRequest struct {
 	Content     *string                  `json:"content"`
 	Config      any                      `json:"config"`
 	Files       []CreateSkillFileRequest `json:"files,omitempty"`
+	// BaseRevision is the skill revision the client edited; the write is
+	// refused with 409 if anyone saved since. Optional: omitted keeps
+	// last-write-wins for clients that predate skill revisions.
+	BaseRevision *int64 `json:"base_revision,omitempty"`
+}
+
+type UpsertSkillFileRequest struct {
+	CreateSkillFileRequest
+	BaseRevision *int64 `json:"base_revision,omitempty"`
 }
 
 type SetAgentSkillsRequest struct {
@@ -509,6 +531,7 @@ func (h *Handler) writeSkillMetadata(w http.ResponseWriter, r *http.Request, ski
 			skill.ID, skill.WorkspaceID, skill.Name, skill.Description,
 			skill.Config, skill.CreatedBy, skill.CreatedAt, skill.UpdatedAt,
 		),
+		Revision:    skill.Revision,
 		ContentSize: int64(len(skill.Content)),
 		ContentHash: contentHash(skill.Content),
 		Files:       fileResps,
@@ -544,6 +567,10 @@ func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid file path: "+f.Path)
 			return
 		}
+	}
+	if err := validateSkillWriteBudget(req.Content, req.Files); err != nil {
+		writeError(w, http.StatusRequestEntityTooLarge, err.Error())
+		return
 	}
 
 	resp, err := h.createSkillWithFiles(r.Context(), skillCreateInput{
@@ -595,6 +622,41 @@ func canOverwriteSkillByLocalImport(userID string, skill db.Skill) bool {
 	return skill.CreatedBy.Valid && uuidToString(skill.CreatedBy) == userID
 }
 
+// validSkillBaseRevision rejects a base_revision no skill can have. Revisions
+// start at 1, so 0 is a client bug (an unset field sent anyway), not "skip
+// the check".
+func validSkillBaseRevision(w http.ResponseWriter, base *int64) bool {
+	if base != nil && *base <= 0 {
+		writeError(w, http.StatusBadRequest, "base_revision must be a positive revision from GET /api/skills/{id}")
+		return false
+	}
+	return true
+}
+
+// checkSkillBaseRevision must run inside the write transaction, before the
+// write. It locks the skill row and answers 409 when the caller named the
+// revision it edited and someone has saved since. With no base revision it is
+// a no-op, so clients that predate skill revisions keep last-write-wins.
+func checkSkillBaseRevision(w http.ResponseWriter, r *http.Request, qtx *db.Queries, skillID pgtype.UUID, base *int64) bool {
+	if base == nil {
+		return true
+	}
+	current, err := qtx.LockSkillForVersioning(r.Context(), skillID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "skill not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to load skill")
+		}
+		return false
+	}
+	if current.Revision != *base {
+		writeRevisionConflict(w, "skill", current.ID, *base, current.Revision)
+		return false
+	}
+	return true
+}
+
 func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	skill, ok := h.loadSkillForUser(w, r, id)
@@ -617,6 +679,9 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if !validSkillBaseRevision(w, req.BaseRevision) {
+		return
+	}
 
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
@@ -627,8 +692,17 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 
 	qtx := h.Queries.WithTx(tx)
 
+	if !checkSkillBaseRevision(w, r, qtx, skill.ID, req.BaseRevision) {
+		return
+	}
+	if err := ensureSkillVersionBaseline(r.Context(), qtx, skill.ID); err != nil {
+		slog.Warn("skill version baseline failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to update skill")
+		return
+	}
+
 	params := db.UpdateSkillParams{
-		ID: parseUUID(id),
+		ID: skill.ID,
 	}
 	if req.Name != nil {
 		params.Name = pgtype.Text{String: sanitizeNullBytes(*req.Name), Valid: true}
@@ -681,11 +755,32 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 			fileResps = append(fileResps, skillFileToResponse(sf))
 		}
 	} else {
-		files, _ := qtx.ListSkillFiles(r.Context(), skill.ID)
+		files, err := qtx.ListSkillFiles(r.Context(), skill.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list skill files")
+			return
+		}
 		fileResps = make([]SkillFileResponse, len(files))
 		for i, f := range files {
 			fileResps[i] = skillFileToResponse(f)
 		}
+	}
+	if req.Content != nil || req.Files != nil {
+		if err := validateSkillResponseBudget(SkillWithFilesResponse{
+			SkillResponse: skillToResponse(skill), Files: fileResps,
+		}); err != nil {
+			writeError(w, http.StatusRequestEntityTooLarge, err.Error())
+			return
+		}
+	}
+
+	if _, err := recordSkillVersion(r.Context(), qtx, skill.ID, skillVersionRecord{
+		Source:    skillVersionSourceUpdate,
+		CreatedBy: parseUUID(requestUserID(r)),
+	}); err != nil {
+		slog.Warn("record skill version failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to update skill")
+		return
 	}
 
 	if err := tx.Commit(r.Context()); err != nil {
@@ -771,7 +866,7 @@ func validImportOnConflict(strategy string) bool {
 const (
 	maxImportFileSize  = 1 << 20 // 1 MiB per file
 	maxImportTotalSize = 8 << 20 // 8 MiB per import bundle (sum of supporting files)
-	maxImportFileCount = 256     // max number of supporting files
+	maxImportFileCount = 512     // max number of supporting files
 )
 
 // importedSkill holds the data extracted from an external source.
@@ -1463,7 +1558,7 @@ func acceptConventionalSkillDir(ctx context.Context, httpClient *http.Client, ra
 // treeDownloadConcurrency bounds how many supporting files are downloaded in
 // parallel during tree-based collection. Small enough that one import cannot
 // open hundreds of sockets to GitHub at once, large enough to keep the download
-// phase well under the overall import deadline for a full (256-file) bundle.
+// phase well under the overall import deadline for a full (512-file) bundle.
 const treeDownloadConcurrency = 8
 
 // addSupportingFilesFromTree enumerates the supporting files under skillDir from
@@ -2173,13 +2268,14 @@ func skillImportConflictReason() string {
 
 func (h *Handler) createImportedSkillWithName(ctx context.Context, workspaceID, creatorID pgtype.UUID, name string, imported *importedSkill, config map[string]any, files []CreateSkillFileRequest) (SkillWithFilesResponse, error) {
 	return h.createSkillWithFiles(ctx, skillCreateInput{
-		WorkspaceID: workspaceID,
-		CreatorID:   creatorID,
-		Name:        name,
-		Description: imported.description,
-		Content:     imported.content,
-		Config:      config,
-		Files:       files,
+		VersionSource: skillVersionSourceImport,
+		WorkspaceID:   workspaceID,
+		CreatorID:     creatorID,
+		Name:          name,
+		Description:   imported.description,
+		Content:       imported.content,
+		Config:        config,
+		Files:         files,
 	})
 }
 
@@ -2501,7 +2597,7 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req CreateSkillFileRequest
+	var req UpsertSkillFileRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -2515,8 +2611,48 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "SKILL.md is reserved for the primary skill content")
 		return
 	}
+	if err := validateSkillWriteBudget("", []CreateSkillFileRequest{req.CreateSkillFileRequest}); err != nil {
+		writeError(w, http.StatusRequestEntityTooLarge, err.Error())
+		return
+	}
+	if !validSkillBaseRevision(w, req.BaseRevision) {
+		return
+	}
 
-	sf, err := h.Queries.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	if !checkSkillBaseRevision(w, r, qtx, skill.ID, req.BaseRevision) {
+		return
+	}
+	// The baseline runs before TouchSkill: it locks the skill row (the same
+	// lock TouchSkill and UpdateSkill take, so lock order is unchanged) and
+	// stamps a pre-versioning skill's baseline with its real updated_at.
+	if err := ensureSkillVersionBaseline(r.Context(), qtx, skill.ID); err != nil {
+		slog.Warn("skill version baseline failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to upsert skill file")
+		return
+	}
+	// Touch the parent first so its row lock is taken before the file write,
+	// in the same order UpdateSkill takes them.
+	skill, err = qtx.TouchSkill(r.Context(), db.TouchSkillParams{
+		ID:          skill.ID,
+		WorkspaceID: skill.WorkspaceID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "skill not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update skill")
+		return
+	}
+	sf, err := qtx.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
 		SkillID: skill.ID,
 		Path:    sanitizeNullBytes(req.Path),
 		Content: sanitizeNullBytes(req.Content),
@@ -2526,7 +2662,29 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to upsert skill file")
 		return
 	}
+	resp, err := skillWithFilesInTx(r.Context(), qtx, skill)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list skill files")
+		return
+	}
+	if err := validateSkillResponseBudget(resp); err != nil {
+		writeError(w, http.StatusRequestEntityTooLarge, err.Error())
+		return
+	}
+	if _, err := recordSkillVersion(r.Context(), qtx, skill.ID, skillVersionRecord{
+		Source:    skillVersionSourceUpdate,
+		CreatedBy: parseUUID(requestUserID(r)),
+	}); err != nil {
+		slog.Warn("record skill version failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to upsert skill file")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit")
+		return
+	}
 
+	h.publishSkillFilesChanged(r, resp)
 	writeJSON(w, http.StatusOK, skillFileToResponse(sf))
 }
 
@@ -2552,11 +2710,98 @@ func (h *Handler) DeleteSkillFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "skill file not found")
 		return
 	}
-	if err := h.Queries.DeleteSkillFile(r.Context(), file.ID); err != nil {
+	// DELETE carries no body, so the precondition travels as a query param.
+	var baseRevision *int64
+	if raw := strings.TrimSpace(r.URL.Query().Get("base_revision")); raw != "" {
+		n, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid base_revision")
+			return
+		}
+		baseRevision = &n
+	}
+	if !validSkillBaseRevision(w, baseRevision) {
+		return
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	if !checkSkillBaseRevision(w, r, qtx, skill.ID, baseRevision) {
+		return
+	}
+	if err := ensureSkillVersionBaseline(r.Context(), qtx, skill.ID); err != nil {
+		slog.Warn("skill version baseline failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete skill file")
 		return
 	}
+	skill, err = qtx.TouchSkill(r.Context(), db.TouchSkillParams{
+		ID:          skill.ID,
+		WorkspaceID: skill.WorkspaceID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "skill not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update skill")
+		return
+	}
+	if err := qtx.DeleteSkillFile(r.Context(), file.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete skill file")
+		return
+	}
+	if _, err := recordSkillVersion(r.Context(), qtx, skill.ID, skillVersionRecord{
+		Source:    skillVersionSourceUpdate,
+		CreatedBy: parseUUID(requestUserID(r)),
+	}); err != nil {
+		slog.Warn("record skill version failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to delete skill file")
+		return
+	}
+	resp, err := skillWithFilesInTx(r.Context(), qtx, skill)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list skill files")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit")
+		return
+	}
+
+	h.publishSkillFilesChanged(r, resp)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// skillWithFilesInTx builds the skill:updated payload from reads inside the
+// writing transaction, so the event carries exactly the state it committed.
+func skillWithFilesInTx(ctx context.Context, qtx *db.Queries, skill db.Skill) (SkillWithFilesResponse, error) {
+	files, err := qtx.ListSkillFiles(ctx, skill.ID)
+	if err != nil {
+		return SkillWithFilesResponse{}, err
+	}
+	fileResps := make([]SkillFileResponse, len(files))
+	for i, f := range files {
+		fileResps[i] = skillFileToResponse(f)
+	}
+	return SkillWithFilesResponse{
+		SkillResponse: skillToResponse(skill),
+		Files:         fileResps,
+	}, nil
+}
+
+// publishSkillFilesChanged announces a supporting-file write the same way
+// UpdateSkill announces an edit: a file change is a change to the skill, and
+// clients holding the skill (detail page, agent skill lists) must refetch it.
+func (h *Handler) publishSkillFilesChanged(r *http.Request, resp SkillWithFilesResponse) {
+	wsID := h.resolveWorkspaceID(r)
+	actorType, actorID := h.resolveActor(r, requestUserID(r), wsID)
+	h.publish(protocol.EventSkillUpdated, wsID, actorType, actorID, map[string]any{"skill": resp})
 }
 
 // --- Agent-Skill junction ---

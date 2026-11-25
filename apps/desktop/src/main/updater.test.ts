@@ -79,7 +79,7 @@ describe("fork review-build update policy", () => {
           JSON.stringify({ automaticUpdates: savedPreference }),
         );
       }
-      const getWindow = vi.fn(() => null);
+      const getWindow = vi.fn(() => []);
       setupAutoUpdater(getWindow);
 
       await expect(invokeIpc("updater:get-preferences")).resolves.toEqual({
@@ -102,7 +102,7 @@ describe("fork review-build update policy", () => {
         updaterPreferencesPath(ctx.userDataPath),
         JSON.stringify({ automaticUpdates: true }),
       );
-      setupAutoUpdater(() => null);
+      setupAutoUpdater(() => []);
 
       await expect(
         invokeIpc("updater:set-automatic-updates", requestedPreference),
@@ -121,7 +121,7 @@ describe("fork review-build update policy", () => {
   );
 
   it("retains boolean validation for automatic update preferences", async () => {
-    setupAutoUpdater(() => null);
+    setupAutoUpdater(() => []);
 
     await expect(
       invokeIpc("updater:set-automatic-updates", "true"),
@@ -130,21 +130,32 @@ describe("fork review-build update policy", () => {
   });
 
   it("returns a compatible manual-check error without checking or downloading", async () => {
-    setupAutoUpdater(() => null);
+    setupAutoUpdater(() => []);
 
     await expect(invokeIpc("updater:check")).resolves.toEqual({
       ok: false,
       error: expect.stringMatching(/review build.*replace.*manually/i),
+      reason: "unavailable",
     });
     expect(ctx.checkForUpdates).not.toHaveBeenCalled();
     expect(ctx.downloadUpdate).not.toHaveBeenCalled();
     expect(ctx.quitAndInstall).not.toHaveBeenCalled();
   });
 
+  it("reports an idle download state without touching electron-updater", async () => {
+    setupAutoUpdater(() => []);
+
+    await expect(invokeIpc("updater:get-download-state")).resolves.toEqual({
+      status: "idle",
+    });
+    expect(ctx.checkForUpdates).not.toHaveBeenCalled();
+    expect(ctx.downloadUpdate).not.toHaveBeenCalled();
+  });
+
   it.each(["updater:download", "updater:install"])(
     "rejects legacy %s IPC with manual replacement guidance",
     async (channel) => {
-      setupAutoUpdater(() => null);
+      setupAutoUpdater(() => []);
 
       await expect(invokeIpc(channel)).rejects.toThrow(
         /review build.*replace.*manually/i,

@@ -13,6 +13,13 @@ interface AppLinkProps extends React.AnchorHTMLAttributes<HTMLAnchorElement> {
    * path.
    */
   newTabTitle?: string;
+  /**
+   * Runs right before the link navigates the current page, and on no other
+   * path: page state that only the current page should take (an open view,
+   * a selected tab) belongs here rather than in `onClick`, which also sees
+   * clicks that open a new tab or window.
+   */
+  onNavigateInPlace?: () => void;
 }
 
 export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
@@ -23,9 +30,11 @@ export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
       onClick,
       onAuxClick,
       onMouseEnter,
+      onMouseLeave,
       onFocus,
       target,
       newTabTitle,
+      onNavigateInPlace,
       ...props
     },
     ref,
@@ -85,6 +94,7 @@ export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
         return;
       }
       e.preventDefault();
+      onNavigateInPlace?.();
       push(href);
     };
 
@@ -119,13 +129,18 @@ export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
 
     const handleMouseEnter = (e: React.MouseEvent<HTMLAnchorElement>) => {
       prefetch?.(href);
-      prefetchData?.(href);
+      prefetchData?.prefetch(href, "hover");
       onMouseEnter?.(e);
+    };
+
+    const handleMouseLeave = (e: React.MouseEvent<HTMLAnchorElement>) => {
+      prefetchData?.cancel();
+      onMouseLeave?.(e);
     };
 
     const handleFocus = (e: React.FocusEvent<HTMLAnchorElement>) => {
       prefetch?.(href);
-      prefetchData?.(href);
+      prefetchData?.prefetch(href, "focus");
       onFocus?.(e);
     };
 
@@ -139,12 +154,13 @@ export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
         rel={target === "_blank" ? "noopener noreferrer" : undefined}
         // Spread props first so that the navigation handlers below cannot be
         // silently overridden by a caller passing
-        // onClick/onAuxClick/onMouseEnter/onFocus through {...rest}. AppLink
-        // owns these four events.
+        // onClick/onAuxClick/onMouseEnter/onMouseLeave/onFocus through
+        // {...rest}. AppLink owns these five events.
         {...props}
         onClick={handleClick}
         onAuxClick={handleAuxClick}
         onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
         onFocus={handleFocus}
       >
         {children}
